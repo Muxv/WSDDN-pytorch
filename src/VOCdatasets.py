@@ -4,6 +4,8 @@ import torchvision
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 import numpy as np
+from scipy.io import loadmat
+
 
 VOC_CLASSES = (  # always index 0
     'aeroplane', 'bicycle', 'bird', 'boat',
@@ -11,6 +13,13 @@ VOC_CLASSES = (  # always index 0
     'cow', 'diningtable', 'dog', 'horse',
     'motorbike', 'person', 'pottedplant',
     'sheep', 'sofa', 'train', 'tvmonitor')
+
+def filter_small_boxes(boxes, min_size):
+    """Filters out small boxes."""
+    w = boxes[:, 2] - boxes[:, 0]
+    h = boxes[:, 3] - boxes[:, 1]
+    mask = (w >= min_size) & (h >= min_size)
+    return mask
 
 class VOCAnnotationAnalyzer():
     """
@@ -83,7 +92,7 @@ class VOCDectectionDataset(data.Dataset):
         load the box generated
         """
         boxes = None
-        boxes_score = None
+        boxes_score = 0
         
         if str(year) == '2007' and image_set == 'trainval' and region_propose == 'selective_search':
             mat = loadmat("../region/SelectiveSearchVOC2007trainval.mat")
@@ -94,12 +103,11 @@ class VOCDectectionDataset(data.Dataset):
         elif str(year) == '2007' and image_set == 'test' and region_propose == 'edge_box':
             mat = loadmat("../region/EdgeBoxesVOC2007test.mat")
         return mat
-        
+            
     def __getitem__(self, index):
         img, gt = self.datas[index]
         region = self.get_box_from_mat(index)
         region_score = self.get_boxScore_from_mat(index)
-        
         if self.target_transform:
             gt = self.target_transform(gt["annotation"])
         
@@ -141,23 +149,36 @@ class VOCDectectionDataset(data.Dataset):
             else:
                 raise NotImplementedError("This dataset can only be compatible with the paper's implementation")
             
-            
             totensor = transforms.ToTensor()
             img = totensor(img)
             gt = np.array(gt)
-            region = np.array(region)
-            if region_score:
+            gt_box = np.array(gt[:, :4])
+            
+            gt_target = gt[:, -1]
+            target = [0 for _ in range(len(VOC_CLASSES))]
+            for t in gt_target:
+                target[t] = 1.0
+            
+            gt_target = np.array(target).astype(np.float32)
+            gt_box = np.array(gt) # split gt -> gt_box,  gt_target
+            
+            region = np.array(region).astype(np.float32)
+
+            region_filter = filter_small_boxes(region, 20)
+            region = region[region_filter]
+            
+            if self.region_propose == "edge_box":
                 region_score = np.array(region_score)
-            print(region_score)
-        
+
+
         if "test" in self.image_set:
             pass
         
 
-        if region_score is not None:
-            return img, gt, region, region_score
+        if region_score is None:
+            return img, gt_box, gt_target, region, np.array([0])
         else:
-            return img, gt, region
+            return img, gt_box, gt_target, region, region_score
         
     def __len__(self):
         return len(self.datas)
