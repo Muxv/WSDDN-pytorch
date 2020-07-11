@@ -6,8 +6,8 @@ import torchvision.transforms as transforms
 import numpy as np
 import copy
 
+from PIL import Image
 from scipy.io import loadmat
-
 
 VOC_CLASSES = (  # always index 0
     'aeroplane', 'bicycle', 'bird', 'boat',
@@ -15,6 +15,22 @@ VOC_CLASSES = (  # always index 0
     'cow', 'diningtable', 'dog', 'horse',
     'motorbike', 'person', 'pottedplant',
     'sheep', 'sofa', 'train', 'tvmonitor')
+
+def remove_repetition(boxes):
+    """
+    remove repetited boxes
+    :param boxes: [N, 4]
+    :return: keep:
+    """
+    _, x1_keep = np.unique(boxes[:, 0], return_index=True)
+    _, x2_keep = np.unique(boxes[:, 2], return_index=True)
+    _, y1_keep = np.unique(boxes[:, 1], return_index=True)
+    _, y2_keep = np.unique(boxes[:, 3], return_index=True)
+ 
+    x_keep = np.union1d(x1_keep, x2_keep)
+    y_keep = np.union1d(y1_keep, y2_keep)
+    mask = np.union1d(x_keep, y_keep)
+    return mask
 
 def filter_small_boxes(boxes, min_size):
     """Filters out small boxes."""
@@ -27,41 +43,45 @@ def totensor(img):
     t = transforms.ToTensor()
     return t(img)
 
-def hflip_box(box, w):
-    """
-    box : [xmin, ymin, xmax, ymax]
-    w   : image's width
-    """
-    box[0], box[2] = w - box[2], w - box[0]
-    return 
+def hflip_box(boxes, w):
+    for box in boxes:
+        box[0], box[2] = w - box[2], w - box[0]
 
 def hflip_img(img):
     """
     img : PIL Image
     """
-    fliper = transforms.RandomHorizontalFlip(1)
-    return fliper(img)
+#     fliper = transforms.RandomHorizontalFlip(1)
+#     cflip(src, flipCode[, dst])
+    return img.transpose(Image.FLIP_LEFT_RIGHT)
 
-def x2ychange_box(box):
-    """
-    box : [ymin, xmin, ymax, xmax]
-     -> : [xmin, ymin, xmax, ymax]
-    
-    """
-    box[0], box[1] = box[1], box[0]
-    box[2], box[3] = box[3], box[2]
-    return 
 
-def resize_box(box, ratio):
-    """
-    box    : [xmin, ymin, xmax, ymax]
-    ration : change ratio
+def x2ychange_box(boxes):
+    for box in boxes:
+        box[0], box[1] = box[1], box[0]
+        box[2], box[3] = box[3], box[2]
+
+def resize_box(boxes, ratio):
+    for box in boxes:
+        box[0] = int(ratio * box[0])
+        box[1] = int(ratio * box[1])
+        box[2] = int(ratio * box[2])
+        box[3] = int(ratio * box[3])
     
-    """    
-    box[0] = int(ratio * box[0])
-    box[1] = int(ratio * box[1])
-    box[2] = int(ratio * box[2])
-    box[3] = int(ratio * box[3])
+def resize_img_maxlength(img, maxlength):
+    """
+    img : PIL Image
+    maxlength : change the image max side length to 
+    """
+    w, h = img.size
+    if (w > h):
+        resizer = transforms.Resize((int(maxlength*h/w), maxlength))
+        ratio = maxlength/w
+    else: # h >= w
+        resizer = transforms.Resize((maxlength, int(maxlength*w/h)))
+        ratio = maxlength/h
+    img = resizer(img)
+    return img, ratio
     
 def resize_img_maxlength(img, maxlength):
     """
@@ -120,7 +140,8 @@ class VOCDectectionDataset(data.Dataset):
                  transform=None, 
                  target_transform=VOCAnnotationAnalyzer(),
                  dataset_name='VOC07_12',
-                 region_propose='selective_search'):
+                 region_propose='selective_search',
+                 debug=False):
         super(VOCDectectionDataset, self).__init__()
         self.datas = datasets.VOCDetection(root, str(year), image_set, download=False)
         self.image_set = image_set
@@ -128,52 +149,8 @@ class VOCDectectionDataset(data.Dataset):
         self.name = dataset_name
         self.target_transform = target_transform # use for annotation
         self.longer_sides = [480, 576, 688, 864, 1200]
-        if region_propose not in ['selective_search', 'edge_box']:
-            raise NotImplementedError(f'{region_propose} not Supported')
-
-        self.region_propose = region_propose
-        self.box_mat = self.get_mat(year, image_set, region_propose)
-            
-            
-    def get_box_from_mat(self, index):
-        return self.box_mat['boxes'][0][index].tolist()
-
-    def get_boxScore_from_mat(self, index):
-        score = None
-        if self.region_propose == 'edge_box':
-            score = self.box_mat['boxScores'][0][index].tolist()
-        return score
-    
-    def get_mat(self, year, image_set, region_propose):
-        """
-        load the box generated
-        """
-        boxes = None
-        boxes_score = 0
-        
-        if str(year) == '2007' and image_set == 'trainval' and region_propose == 'selective_search':
-            mat = loadmat("../region/SelectiveSearchVOC2007trainval.mat")
-        elif str(year) == '2007' and image_set == 'test' and region_propose == 'selective_search':
-            mat = loadmat("../region/SelectiveSearchVOC2007test.mat")
-        if str(year) == '2007' and image_set == 'trainval' and region_propose == 'edge_box':
-            mat = loadmat("../region/EdgeBoxesVOC2007trainval.mat")
-        elif str(year) == '2007' and image_set == 'test' and region_propose == 'edge_box':
-            mat = loadmat("../region/EdgeBoxesVOC2007test.mat")
-        return mat
-            
-class VOCDectectionDataset(data.Dataset):
-    def __init__(self, root, year, image_set,
-                 transform=None, 
-                 target_transform=VOCAnnotationAnalyzer(),
-                 dataset_name='VOC07_12',
-                 region_propose='selective_search'):
-        super(VOCDectectionDataset, self).__init__()
-        self.datas = datasets.VOCDetection(root, str(year), image_set, download=False)
-        self.image_set = image_set
-        self.transform = transform
-        self.name = dataset_name
-        self.target_transform = target_transform # use for annotation
-        self.longer_sides = [480, 576, 688, 864, 1200]
+        self.longer_sides_small = [480, 576]
+        self.debug = debug
         if region_propose not in ['selective_search', 'edge_box']:
             raise NotImplementedError(f'{region_propose} not Supported')
 
@@ -214,96 +191,86 @@ class VOCDectectionDataset(data.Dataset):
         if self.target_transform:
             gt = self.target_transform(gt["annotation"])
         w, h = img.size
+        
+        region = np.array(region).astype(np.float32)
+        region_filter = filter_small_boxes(region, 20)
+        region = region[region_filter]
+        
+        unique_filter = remove_repetition(region)
+        region = region[unique_filter]
+        
+        x2ychange_box(region)
+
+        if region_score is not None:
+            region_score = np.array(region_score).astype(np.float32)
+            region_score = region_score[region_filter]
+            region_score = region_score[unique_filter]
+        gt = np.array(gt).astype(np.float32)
+
         # ----------------------------------------------------------------------------------
-        if self.image_set == "trainval":
+        if self.debug == True:
+            return img, gt, region
+        
+        elif self.image_set == "trainval":
+            target = [0 for _ in range(len(VOC_CLASSES))]
+            gt_target = gt[:, -1]
+            for t in gt_target:
+                target[int(t)] = 1.0
+            gt_box = gt[:, :4]
+            gt_target = np.array(target).astype(np.float32)
+            
             if self.transform is None:
                 # follow by paper: randomly horiztontal flip and randomly resize
-                for box in region:
-                    x2ychange_box(box)                
                 if np.random.random() > 0.5: # then flip
+#                     print("Flip!")
                     img = hflip_img(img)
-                    for box in gt: # change gt
-                        hflip_box(box, w)
-                    for box in region: # ssw generate is [ymin, xmin, ymax, xmax]
-                        hflip_box(box, w)
-
+                    hflip_box(region, w)
+                    hflip_box(gt_box, w)
                 # then resize
-                max_side = self.longer_sides[np.random.randint(5)]
+                max_side = self.longer_sides_small[np.random.randint(2)]
+#                 print(f"resize_to_{max_side}")
                 img, ratio = resize_img_maxlength(img, max_side)
-                for box in gt:
-                    resize_box(box, ratio)
-                for box in region:
-                    resize_box(box, ratio)
+                resize_box(region, ratio)
+                resize_box(gt_box, ratio)
             else:
                 raise NotImplementedError("This dataset can only be compatible with the paper's implementation")
 
             img = totensor(img)
-            gt = np.array(gt)
-            gt_box = np.array(gt[:, :4])
-            gt_target = gt[:, -1]
-            target = [0 for _ in range(len(VOC_CLASSES))]
-            for t in gt_target:
-                target[t] = 1.0
-            
-            gt_target = np.array(target).astype(np.float32)
-            gt_box = np.array(gt).astype(np.float32) # split gt -> gt_box,  gt_target
-            
-            region = np.array(region).astype(np.float32)
 
-            region_filter = filter_small_boxes(region, 32)
-            region = region[region_filter]
-            
-            if region_score:
-                region_score = np.array(region_score)
-                
+
             if region_score is None:
-                return img, gt_box, gt_target, region, np.array([0])
+                return img, gt_box, gt_target, region, np.array([1])
             else:
                 return img, gt_box, gt_target, region, region_score
         # ----------------------------------------------------------------------------------
 
         elif self.image_set == "test":
-            ten_images = []
-            ten_gt = []
-            ten_regions = []
+            n_images = []
+            n_regions = []
             if self.transform is not None:
                 raise NotImplementedError("This dataset can only be compatible with the paper's implementation")
             else:
                 # first change box's cor
-                for box in region:
-                    x2ychange_box(box)
                 # follow by paper: get 10 images for hflip and resize2 5sizes
                 for flip in [0.0, 1.0]:
-                    fliper = transforms.RandomHorizontalFlip(flip)
-                    for max_side in self.longer_sides:
+                    for max_side in self.longer_sides_small:
                         new_img = img.copy()
-                        new_gt = copy.deepcopy(gt)
                         new_region = copy.deepcopy(region)
                         if flip == 1.0:
                             new_img = hflip_img(new_img)
-                            for box in new_gt: # change gt
-                                hflip_box(box, w)
-                            for box in new_region: # ssw generate is [ymin, xmin, ymax, xmax]
-                                hflip_box(box, w)
+                            hflip_box(new_region, w)
                         new_img, ratio = resize_img_maxlength(new_img, max_side)
-                        for box in new_gt:
-                            resize_box(box, ratio)
-                        for box in new_region:
-                            resize_box(box, ratio)
+                        resize_box(new_region, ratio)
+                        
 
-                        ten_images.append(totensor(new_img))
-                        ten_gt.append(np.array(new_gt).astype(np.float32))
-                        # ripe out too small boxes
-                        new_region = np.array(new_region).astype(np.float32)
-                        region_filter = filter_small_boxes(new_region, 32)
-                        new_region = new_region[region_filter]
-                        ten_regions.append(new_region)
-            if region_score:
-                region_score = np.array(region_score)
+                        n_images.append(totensor(new_img))
+                        n_regions.append(new_region)
+
             if region_score is None:
-                return ten_images, ten_gt, ten_regions, np.array([0])
+                return n_images, gt, n_regions, region, np.array([1])
             else:
-                return ten_images, ten_gt, ten_regions, region_score
+                return n_images, gt, n_regions, region, region_score
+
             
         else:
             raise ValueError(f"image_set can only be 'test' or 'trainval'")
