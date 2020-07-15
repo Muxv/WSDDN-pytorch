@@ -22,6 +22,7 @@ class VGG_CNN_F(nn.Module):
                                kernel_size=11,
                                stride=4,
                                padding=0)
+        self.relu1 = nn.ReLU(inplace=True)
         self.lrn1 = nn.LocalResponseNorm(size=5,
                                          alpha=1e-4,
                                          beta=0.75,
@@ -34,6 +35,7 @@ class VGG_CNN_F(nn.Module):
                                kernel_size=5,
                                stride=1,
                                padding=2)
+        self.relu2 = nn.ReLU(inplace=True)
         self.lrn2 = nn.LocalResponseNorm(size=5,
                                          alpha=1e-4,
                                          beta=0.75,
@@ -45,28 +47,31 @@ class VGG_CNN_F(nn.Module):
                                kernel_size=3,
                                stride=1,
                                padding=1)
+        self.relu3 = nn.ReLU(inplace=True)
         self.conv4 = nn.Conv2d(256,
                                256,
                                kernel_size=3,
                                stride=1,
                                padding=1)
+        self.relu4 = nn.ReLU(inplace=True)
         self.conv5 = nn.Conv2d(256,
                                256,
                                kernel_size=3,
                                stride=1,
                                padding=1)
+        self.relu5 = nn.ReLU(inplace=True)
 
 
     def forward(self, x):
         out = self.conv1(x)
-        out = self.pool1(self.lrn1(F.relu(out)))
+        out = self.pool1(self.lrn1(self.relu1(out)))
         
         out = self.conv2(out)
-        out = self.pool2(self.lrn2(F.relu(out)))
+        out = self.pool2(self.lrn2(self.relu2(out)))
 
-        out = F.relu(self.conv3(out))
-        out = F.relu(self.conv4(out))
-        out = F.relu(self.conv5(out))
+        out = F.relu(self.relu3(out))
+        out = F.relu(self.relu4(out))
+        out = F.relu(self.relu5(out))
         return out
 
     def load_mat(self, mat_path="../pretrained/imagenet-vgg-f.mat"):

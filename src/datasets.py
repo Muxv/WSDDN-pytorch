@@ -137,7 +137,7 @@ class VOCAnnotationAnalyzer():
         
 class VOCDectectionDataset(data.Dataset):
     def __init__(self, root, year, image_set,
-                 transform=None, 
+                 do_transform=True, 
                  target_transform=VOCAnnotationAnalyzer(),
                  dataset_name='VOC07_12',
                  region_propose='selective_search',
@@ -145,7 +145,7 @@ class VOCDectectionDataset(data.Dataset):
         super(VOCDectectionDataset, self).__init__()
         self.datas = datasets.VOCDetection(root, str(year), image_set, download=False)
         self.image_set = image_set
-        self.transform = transform
+        self.do_transform = do_transform
         self.name = dataset_name
         self.target_transform = target_transform # use for annotation
         self.longer_sides = [480, 576, 688, 864, 1200]
@@ -199,12 +199,13 @@ class VOCDectectionDataset(data.Dataset):
         unique_filter = remove_repetition(region)
         region = region[unique_filter]
         
-        x2ychange_box(region)
-
+        x2ychange_box(region)        
         if region_score is not None:
+            
             region_score = np.array(region_score).astype(np.float32)
             region_score = region_score[region_filter]
             region_score = region_score[unique_filter]
+        
         gt = np.array(gt).astype(np.float32)
 
         # ----------------------------------------------------------------------------------
@@ -219,25 +220,18 @@ class VOCDectectionDataset(data.Dataset):
             gt_box = gt[:, :4]
             gt_target = np.array(target).astype(np.float32)
             
-            if self.transform is None:
+            if self.do_transform:
                 # follow by paper: randomly horiztontal flip and randomly resize
                 if np.random.random() > 0.5: # then flip
-#                     print("Flip!")
                     img = hflip_img(img)
                     hflip_box(region, w)
                     hflip_box(gt_box, w)
                 # then resize
-                max_side = self.longer_sides_small[np.random.randint(2)]
-#                 print(f"resize_to_{max_side}")
+                max_side = self.longer_sides[np.random.randint(5)]
                 img, ratio = resize_img_maxlength(img, max_side)
                 resize_box(region, ratio)
                 resize_box(gt_box, ratio)
-            else:
-                raise NotImplementedError("This dataset can only be compatible with the paper's implementation")
-
             img = totensor(img)
-
-
             if region_score is None:
                 return img, gt_box, gt_target, region, np.array([1])
             else:
@@ -245,15 +239,16 @@ class VOCDectectionDataset(data.Dataset):
         # ----------------------------------------------------------------------------------
 
         elif self.image_set == "test":
+#             sc_filter = (region_score > 0.1)[:, 0]  # from (N, 1) -> (N, ) 
+#             region_score = region_score[sc_filter]
+#             region = region[sc_filter, :]
             n_images = []
             n_regions = []
-            if self.transform is not None:
-                raise NotImplementedError("This dataset can only be compatible with the paper's implementation")
-            else:
+            if self.do_transform:
                 # first change box's cor
                 # follow by paper: get 10 images for hflip and resize2 5sizes
                 for flip in [0.0, 1.0]:
-                    for max_side in self.longer_sides_small:
+                    for max_side in self.longer_sides:
                         new_img = img.copy()
                         new_region = copy.deepcopy(region)
                         if flip == 1.0:
@@ -261,10 +256,10 @@ class VOCDectectionDataset(data.Dataset):
                             hflip_box(new_region, w)
                         new_img, ratio = resize_img_maxlength(new_img, max_side)
                         resize_box(new_region, ratio)
-                        
-
                         n_images.append(totensor(new_img))
                         n_regions.append(new_region)
+            else:
+                raise ValueError("Test Mode must do transform")
 
             if region_score is None:
                 return n_images, gt, n_regions, region, np.array([1])
@@ -277,3 +272,4 @@ class VOCDectectionDataset(data.Dataset):
         
     def __len__(self):
         return len(self.datas)
+#         return 100
