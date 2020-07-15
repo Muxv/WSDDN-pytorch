@@ -1,0 +1,4 @@
+propose_way: edge_box
+model_name: wsddn_vgg16
+propose_way: edge_box
+model_name: wsddn_vgg16
